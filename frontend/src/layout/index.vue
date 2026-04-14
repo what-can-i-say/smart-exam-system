@@ -17,11 +17,13 @@
           <span>学习仪表盘</span>
         </el-menu-item>
         
-        <el-menu-item index="/practice">
+        <!-- 注意：路径改为 /practice/start -->
+        <el-menu-item index="/practice/start">
           <el-icon><Edit /></el-icon>
           <span>刷题练习</span>
         </el-menu-item>
         
+        <!-- 注意：路径改为 /review -->
         <el-menu-item index="/review">
           <el-icon><Clock /></el-icon>
           <span>智能复习</span>
@@ -84,7 +86,23 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const activeMenu = computed(() => route.path)
+// 修复菜单高亮逻辑
+const activeMenu = computed(() => {
+  const path = route.path
+  
+  // 刷题模块：统一高亮 /practice/start
+  if (path.startsWith('/practice')) {
+    return '/practice/start'
+  }
+  
+  // 复习模块：统一高亮 /review/index
+  if (path.startsWith('/review')) {
+    return '/review'
+  }
+  
+  return path
+})
+
 const currentTitle = computed(() => route.meta.title || '')
 
 const handleCommand = (command) => {

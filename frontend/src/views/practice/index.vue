@@ -1,10 +1,12 @@
 <template>
-  <div class="practice">
-    <el-card>
-      <template #header>
-        <span>📝 刷题练习</span>
-      </template>
-      <p>刷题功能开发中，敬请期待...</p>
-    </el-card>
-  </div>
+  <router-view />
 </template>
+
+<script setup>
+// 刷题模块入口，用于承载子路由
+// 不需要任何额外逻辑
+</script>
+
+<style scoped>
+/* 不需要额外样式 */
+</style>
