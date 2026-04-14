@@ -100,6 +100,9 @@ const activeMenu = computed(() => {
     return '/review'
   }
   
+  if (path.startsWith('/analysis')) {
+    return '/analysis'
+  }
   return path
 })
 
