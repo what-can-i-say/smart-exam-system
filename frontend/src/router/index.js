@@ -30,7 +30,7 @@ const routes = [
           {
             path: 'start',
             name: 'PracticeStart',
-            component: () => import('@/views/practice/Start.vue'),
+            component: () => import('../views/practice/Start.vue'), 
             meta: { title: '开始刷题' }
           },
           {

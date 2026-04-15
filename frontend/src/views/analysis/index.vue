@@ -8,11 +8,10 @@
 
     <!-- 学科选择 -->
     <el-card class="subject-card">
-      <el-radio-group v-model="currentSubject" size="large">
-        <el-radio-button :value="1">高等数学</el-radio-button>
-        <el-radio-button :value="2">英语</el-radio-button>
-        <el-radio-button :value="3">政治</el-radio-button>
-        <el-radio-button :value="4">专业课</el-radio-button>
+      <el-radio-group v-model="currentSubject" size="large" @change="handleSubjectChange">
+        <el-radio-button v-for="s in subjects" :key="s.id" :value="s.id">
+          {{ s.icon }} {{ s.name }}
+        </el-radio-button>
       </el-radio-group>
     </el-card>
 
@@ -81,16 +80,18 @@
               class="weak-item"
               @click="showRecommendation(item)"
             >
-              <div class="rank">{{ index + 1 }}</div>
+              <div class="rank" :class="getRankClass(index)">{{ index + 1 }}</div>
               <div class="info">
                 <div class="name">{{ item.name }}</div>
                 <el-progress
-                  :percentage="item.weakScore"
-                  :color="getWeakColor(item.weakScore)"
+                  :percentage="item.mastery"
+                  :color="getProgressColor(item.mastery)"
                   :stroke-width="6"
                 />
               </div>
-              <div class="score">{{ item.weakScore }}%</div>
+              <div class="score" :style="{ color: getProgressColor(item.mastery) }">
+                {{ item.mastery }}%
+              </div>
             </div>
           </div>
         </el-card>
@@ -104,15 +105,16 @@
       </template>
 
       <el-table
-        :data="knowledgeList"
+        :data="knowledgeTree"
         row-key="id"
         :tree-props="{ children: 'children' }"
         style="width: 100%"
+        :empty-text="emptyText"
       >
         <el-table-column prop="name" label="知识点" min-width="200">
           <template #default="{ row }">
             <span :style="{ paddingLeft: (row.level - 1) * 20 + 'px' }">
-              {{ row.name }}
+              {{ row.level === 1 ? '📁' : '📄' }} {{ row.name }}
             </span>
           </template>
         </el-table-column>
@@ -129,18 +131,28 @@
         </el-table-column>
         <el-table-column prop="masteryLevel" label="掌握程度" width="120" align="center">
           <template #default="{ row }">
-            <el-tag :type="getMasteryTag(row.masteryLevel)">
+            <el-tag :type="getMasteryTagType(row.masteryLevel)">
               {{ getMasteryText(row.masteryLevel) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="150">
           <template #default="{ row }">
-            <el-button type="primary" link @click="practiceKnowledge(row)">
+            <el-button 
+              v-if="row.level === 2" 
+              type="primary" 
+              link 
+              @click="practiceKnowledge(row)"
+            >
               针对性练习
             </el-button>
-            <el-button type="success" link @click="viewDetail(row)">
-              详情
+            <el-button 
+              v-if="row.level === 2" 
+              type="success" 
+              link 
+              @click="showRecommendation(row)"
+            >
+              推荐
             </el-button>
           </template>
         </el-table-column>
@@ -156,14 +168,18 @@
       <div v-if="currentWeakPoint" class="recommend-content">
         <div class="weak-info">
           <h4>{{ currentWeakPoint.name }}</h4>
-          <p>薄弱程度：{{ currentWeakPoint.weakScore }}%</p>
-          <p>建议：多练习基础题，巩固概念理解</p>
+          <p>当前掌握程度：{{ currentWeakPoint.mastery }}%</p>
+          <p class="suggestion">{{ getSuggestion(currentWeakPoint.mastery) }}</p>
         </div>
 
         <div class="recommend-questions">
-          <h5>推荐题目</h5>
+          <h5>推荐题目（{{ recommendQuestions.length }} 道）</h5>
           <el-table :data="recommendQuestions" style="width: 100%">
-            <el-table-column prop="content" label="题目" />
+            <el-table-column prop="content" label="题目">
+              <template #default="{ row }">
+                {{ truncateContent(row.content, 40) }}
+              </template>
+            </el-table-column>
             <el-table-column prop="difficulty" label="难度" width="80">
               <template #default="{ row }">
                 <el-tag :type="getDifficultyTag(row.difficulty)" size="small">
@@ -186,9 +202,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import * as echarts from 'echarts'
+import { subjects } from '@/data/subjects'
+import {
+  getRadarChartData,
+  getWeakKnowledgeTop,
+  getKnowledgeTreeData,
+  getOverallStats,
+  getRecommendQuestions,
+  getProgressColor,
+  getMasteryText,
+  getMasteryTagType,
+  initMockAnalysisData
+} from '@/utils/analysis'
 
 const router = useRouter()
 
@@ -201,143 +229,88 @@ let radarChart = null
 
 // 整体统计
 const overallStats = reactive({
-  masteryRate: 68,
-  totalQuestions: 156,
-  correctQuestions: 106,
-  wrongQuestions: 50
+  masteryRate: 0,
+  totalQuestions: 0,
+  answeredQuestions: 0,
+  correctQuestions: 0,
+  wrongQuestions: 0
 })
 
 // 薄弱点 Top 5
-const weakTop5 = ref([
-  { id: 1, name: '极限的运算法则', weakScore: 78 },
-  { id: 2, name: '导数应用', weakScore: 65 },
-  { id: 3, name: '中值定理', weakScore: 58 },
-  { id: 4, name: '不定积分', weakScore: 52 },
-  { id: 5, name: '定积分应用', weakScore: 45 }
-])
+const weakTop5 = ref([])
 
-// 知识图谱列表
-const knowledgeList = ref([
-  {
-    id: 1,
-    name: '函数与极限',
-    level: 1,
-    totalQuestions: 50,
-    answeredQuestions: 45,
-    correctRate: 72,
-    masteryLevel: 3,
-    children: [
-      {
-        id: 11,
-        name: '函数概念',
-        level: 2,
-        totalQuestions: 15,
-        answeredQuestions: 15,
-        correctRate: 85,
-        masteryLevel: 4
-      },
-      {
-        id: 12,
-        name: '极限定义',
-        level: 2,
-        totalQuestions: 20,
-        answeredQuestions: 18,
-        correctRate: 65,
-        masteryLevel: 2
-      },
-      {
-        id: 13,
-        name: '极限运算法则',
-        level: 2,
-        totalQuestions: 15,
-        answeredQuestions: 12,
-        correctRate: 58,
-        masteryLevel: 2
-      }
-    ]
-  },
-  {
-    id: 2,
-    name: '导数与微分',
-    level: 1,
-    totalQuestions: 45,
-    answeredQuestions: 40,
-    correctRate: 70,
-    masteryLevel: 3,
-    children: [
-      {
-        id: 21,
-        name: '导数定义',
-        level: 2,
-        totalQuestions: 15,
-        answeredQuestions: 15,
-        correctRate: 80,
-        masteryLevel: 4
-      },
-      {
-        id: 22,
-        name: '求导法则',
-        level: 2,
-        totalQuestions: 20,
-        answeredQuestions: 18,
-        correctRate: 68,
-        masteryLevel: 3
-      },
-      {
-        id: 23,
-        name: '高阶导数',
-        level: 2,
-        totalQuestions: 10,
-        answeredQuestions: 7,
-        correctRate: 55,
-        masteryLevel: 2
-      }
-    ]
-  }
-])
+// 知识图谱树
+const knowledgeTree = ref([])
+
+// 雷达图数据
+const radarData = ref({
+  indicators: [],
+  values: []
+})
 
 // 对话框
 const showRecommendDialog = ref(false)
 const currentWeakPoint = ref(null)
-const recommendQuestions = ref([
-  { id: 1, content: '求极限 lim(x→0) (sin3x)/x', difficulty: 1 },
-  { id: 2, content: '求极限 lim(x→∞) (1+1/x)^x', difficulty: 2 },
-  { id: 3, content: '求极限 lim(x→0) (e^x-1)/x', difficulty: 2 }
-])
+const recommendQuestions = ref([])
 
-// 雷达图指标
-const radarIndicators = [
-  { name: '函数与极限', max: 100 },
-  { name: '导数与微分', max: 100 },
-  { name: '中值定理', max: 100 },
-  { name: '不定积分', max: 100 },
-  { name: '定积分', max: 100 },
-  { name: '微分方程', max: 100 }
-]
+const emptyText = '暂无数据，先去刷题吧！'
 
-const radarData = [72, 70, 58, 65, 60, 45]
+// 获取排名样式
+const getRankClass = (index) => {
+  if (index === 0) return 'first'
+  if (index === 1) return 'second'
+  if (index === 2) return 'third'
+  return ''
+}
+
+// 截断内容
+const truncateContent = (content, length = 30) => {
+  if (!content) return ''
+  return content.length > length ? content.slice(0, length) + '...' : content
+}
+
+// 获取难度标签
+const getDifficultyTag = (difficulty) => {
+  const tags = ['', 'success', 'warning', 'danger']
+  return tags[difficulty] || 'info'
+}
+
+const getDifficultyText = (difficulty) => {
+  const texts = ['', '简单', '中等', '困难']
+  return texts[difficulty] || '未知'
+}
+
+// 获取建议
+const getSuggestion = (mastery) => {
+  if (mastery < 40) return '建议从基础概念开始，多做基础题巩固理解。'
+  if (mastery < 60) return '建议加强练习，重点关注易错题型。'
+  if (mastery < 80) return '掌握程度良好，可以挑战一些中等难度题目。'
+  return '掌握程度优秀，可以尝试高难度题目提升能力。'
+}
 
 // 渲染雷达图
 const renderRadarChart = () => {
   if (!radarChartRef.value) return
-
-  radarChart = echarts.init(radarChartRef.value)
-
+  
+  if (!radarChart) {
+    radarChart = echarts.init(radarChartRef.value)
+  }
+  
   const option = {
     radar: {
-      indicator: radarIndicators,
+      indicator: radarData.value.indicators,
       shape: 'circle',
       center: ['50%', '50%'],
       radius: '65%',
       axisName: {
         color: '#333',
-        fontSize: 12
+        fontSize: 11
       }
     },
     series: [{
       type: 'radar',
       data: [{
-        value: radarData,
+        value: radarData.value.values,
         name: '掌握程度',
         areaStyle: {
           color: 'rgba(64, 158, 255, 0.3)'
@@ -352,83 +325,82 @@ const renderRadarChart = () => {
       }]
     }]
   }
-
+  
   radarChart.setOption(option)
+}
 
-  window.addEventListener('resize', () => {
-    radarChart?.resize()
+// 加载所有数据
+const loadData = () => {
+  // 获取雷达图数据
+  const radar = getRadarChartData(currentSubject.value)
+  radarData.value = {
+    indicators: radar.indicators,
+    values: radar.values
+  }
+  
+  // 获取薄弱点
+  weakTop5.value = getWeakKnowledgeTop(currentSubject.value, 5)
+  
+  // 获取知识图谱
+  knowledgeTree.value = getKnowledgeTreeData(currentSubject.value)
+  
+  // 获取整体统计
+  const stats = getOverallStats(currentSubject.value)
+  overallStats.masteryRate = stats.masteryRate
+  overallStats.totalQuestions = stats.totalQuestions
+  overallStats.answeredQuestions = stats.answeredQuestions
+  overallStats.correctQuestions = stats.correctQuestions
+  overallStats.wrongQuestions = stats.wrongQuestions
+  
+  // 重新渲染雷达图
+  nextTick(() => {
+    renderRadarChart()
   })
 }
 
-// 获取进度条颜色
-const getProgressColor = (rate) => {
-  if (rate >= 80) return '#67C23A'
-  if (rate >= 60) return '#E6A23C'
-  return '#F56C6C'
-}
-
-// 获取薄弱程度颜色
-const getWeakColor = (score) => {
-  if (score >= 70) return '#F56C6C'
-  if (score >= 40) return '#E6A23C'
-  return '#67C23A'
-}
-
-// 获取掌握程度标签
-const getMasteryTag = (level) => {
-  const tags = ['', 'danger', 'warning', 'primary', 'success', 'success']
-  return tags[level] || 'info'
-}
-
-const getMasteryText = (level) => {
-  const texts = ['', '很差', '较差', '一般', '良好', '优秀']
-  return texts[level] || '未知'
-}
-
-// 获取难度标签
-const getDifficultyTag = (difficulty) => {
-  const tags = ['', 'success', 'warning', 'danger']
-  return tags[difficulty] || 'info'
-}
-
-const getDifficultyText = (difficulty) => {
-  const texts = ['', '简单', '中等', '困难']
-  return texts[difficulty] || '未知'
+// 学科变更
+const handleSubjectChange = () => {
+  loadData()
 }
 
 // 显示推荐
 const showRecommendation = (item) => {
   currentWeakPoint.value = item
+  recommendQuestions.value = getRecommendQuestions(item.id, 5)
   showRecommendDialog.value = true
 }
 
 // 针对性练习
 const practiceKnowledge = (row) => {
-  router.push({
-    path: '/practice/start',
-    query: { knowledgeId: row.id }
-  })
-}
-
-// 查看详情
-const viewDetail = (row) => {
-  console.log('查看详情:', row)
+  localStorage.setItem('currentPractice', JSON.stringify({
+    knowledgeId: row.id,
+    questionCount: 10,
+    difficulty: 0
+  }))
+  router.push('/practice/doing')
 }
 
 // 开始推荐练习
 const startRecommendedPractice = () => {
-  showRecommendDialog.value = false
-  router.push('/practice/start')
+  if (currentWeakPoint.value) {
+    localStorage.setItem('currentPractice', JSON.stringify({
+      knowledgeId: currentWeakPoint.value.id,
+      questionCount: 10,
+      difficulty: 0
+    }))
+    showRecommendDialog.value = false
+    router.push('/practice/doing')
+  }
 }
 
-// 监听学科变化
-watch(currentSubject, () => {
-  // 重新加载数据
-  renderRadarChart()
+// 窗口大小变化时重绘图表
+window.addEventListener('resize', () => {
+  radarChart?.resize()
 })
 
 onMounted(() => {
-  renderRadarChart()
+  initMockAnalysisData()
+  loadData()
 })
 </script>
 
@@ -518,6 +490,7 @@ onMounted(() => {
         padding: 12px 0;
         border-bottom: 1px solid #eee;
         cursor: pointer;
+        transition: background 0.2s;
 
         &:hover {
           background: #f5f7fa;
@@ -533,6 +506,21 @@ onMounted(() => {
           border-radius: 50%;
           font-weight: bold;
           margin-right: 12px;
+
+          &.first {
+            background: #FFD700;
+            color: white;
+          }
+
+          &.second {
+            background: #C0C0C0;
+            color: white;
+          }
+
+          &.third {
+            background: #CD7F32;
+            color: white;
+          }
         }
 
         .info {
@@ -548,7 +536,6 @@ onMounted(() => {
           min-width: 50px;
           text-align: right;
           font-weight: bold;
-          color: #F56C6C;
         }
       }
     }
@@ -573,6 +560,11 @@ onMounted(() => {
       p {
         color: #666;
         margin-bottom: 5px;
+      }
+
+      .suggestion {
+        color: #409EFF;
+        margin-top: 10px;
       }
     }
 

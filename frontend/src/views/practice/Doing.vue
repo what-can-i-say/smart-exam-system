@@ -23,22 +23,30 @@
         <el-tag :type="difficultyTag" style="margin-left: 10px">
           {{ difficultyText }}
         </el-tag>
-        <span class="question-id">题目 ID: {{ currentQuestion.id }}</span>
+        <span class="question-id">题目 {{ currentIndex + 1 }}</span>
       </div>
       
       <!-- 题目内容 -->
       <div class="question-content">
-        <h3>{{ currentIndex + 1 }}. {{ currentQuestion.content }}</h3>
+        <h3>{{ currentQuestion.content }}</h3>
       </div>
       
       <!-- 选项 -->
       <div class="question-options">
-        <el-radio-group v-model="selectedAnswer" v-if="currentQuestion.type === 1">
+        <el-radio-group 
+          v-model="selectedAnswer" 
+          v-if="currentQuestion.type === 1"
+          :disabled="showResult"
+        >
           <el-radio 
             v-for="(option, key) in currentQuestion.options" 
             :key="key"
             :label="key"
             class="option-item"
+            :class="{
+              'correct-option': showResult && key === currentQuestion.answer,
+              'wrong-option': showResult && selectedAnswer === key && key !== currentQuestion.answer
+            }"
           >
             <span class="option-label">{{ key }}.</span>
             <span class="option-text">{{ option }}</span>
@@ -48,6 +56,7 @@
         <el-checkbox-group 
           v-model="selectedAnswers" 
           v-else-if="currentQuestion.type === 2"
+          :disabled="showResult"
         >
           <el-checkbox 
             v-for="(option, key) in currentQuestion.options" 
@@ -59,19 +68,32 @@
             <span class="option-text">{{ option }}</span>
           </el-checkbox>
         </el-checkbox-group>
+        
+        <el-radio-group 
+          v-model="selectedAnswer" 
+          v-else-if="currentQuestion.type === 3"
+          :disabled="showResult"
+        >
+          <el-radio label="true" class="option-item">正确</el-radio>
+          <el-radio label="false" class="option-item">错误</el-radio>
+        </el-radio-group>
       </div>
       
       <!-- 答题结果展示 -->
       <div v-if="showResult" class="answer-result">
         <el-alert 
           :type="isCorrect ? 'success' : 'error'"
-          :title="isCorrect ? '回答正确！' : '回答错误'"
+          :title="isCorrect ? '✓ 回答正确！' : '✗ 回答错误'"
           :closable="false"
         >
           <template v-if="!isCorrect">
-            <p>正确答案：{{ currentQuestion.answer }}</p>
+            <p class="correct-answer-text">
+              正确答案：{{ formatAnswer(currentQuestion.answer) }}
+            </p>
           </template>
-          <p>解析：{{ currentQuestion.analysis }}</p>
+          <p class="analysis-text">
+            <strong>解析：</strong>{{ currentQuestion.analysis }}
+          </p>
         </el-alert>
       </div>
       
@@ -110,7 +132,7 @@
     </el-card>
     
     <!-- 答题卡 -->
-    <el-card class="answer-sheet" style="margin-top: 20px">
+    <el-card class="answer-sheet">
       <template #header>
         <span>📋 答题卡</span>
       </template>
@@ -130,76 +152,37 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { getPracticeQuestions, getKnowledgeName, getSubjectNameByKnowledge } from '../../data/questions'
 
 const router = useRouter()
 
-// 模拟题目数据
-const questions = ref([
-  {
-    id: 1,
-    type: 1, // 1-单选 2-多选
-    difficulty: 1,
-    content: '函数 f(x) = x² 在 x=0 处的极限是多少？',
-    options: {
-      A: '0',
-      B: '1',
-      C: '不存在',
-      D: '无穷大'
-    },
-    answer: 'A',
-    analysis: '当 x 趋近于 0 时，x² 趋近于 0。',
-    userAnswer: null,
-    isCorrect: null
-  },
-  {
-    id: 2,
-    type: 1,
-    difficulty: 2,
-    content: '极限 lim(x→0) sinx/x 的值是？',
-    options: {
-      A: '0',
-      B: '1',
-      C: '-1',
-      D: '不存在'
-    },
-    answer: 'B',
-    analysis: '这是一个重要极限，lim(x→0) sinx/x = 1。',
-    userAnswer: null,
-    isCorrect: null
-  },
-  {
-    id: 3,
-    type: 2,
-    difficulty: 2,
-    content: '下列哪些是无穷小量？',
-    options: {
-      A: 'x (x→0)',
-      B: 'sinx (x→0)',
-      C: '1/x (x→∞)',
-      D: 'e^x (x→-∞)'
-    },
-    answer: 'ABCD',
-    analysis: '当 x→0 时，x 和 sinx 是无穷小；当 x→∞ 时，1/x 是无穷小；当 x→-∞ 时，e^x 是无穷小。',
-    userAnswer: null,
-    isCorrect: null
-  }
-])
-
+// 题目列表
+const questions = ref([])
 const currentIndex = ref(0)
 const selectedAnswer = ref('')
 const selectedAnswers = ref([])
 const showResult = ref(false)
+
+// 练习记录
+const practiceRecord = ref({
+  startTime: Date.now(),
+  answers: [],
+  correctCount: 0
+})
+
+// 计时器
+const timer = ref(null)
+const elapsedTime = ref(0)
 
 // 当前题目
 const currentQuestion = computed(() => questions.value[currentIndex.value])
 
 // 进度百分比
 const progressPercent = computed(() => {
-  const answered = questions.value.filter(q => q.userAnswer !== null).length
-  return Math.round((answered / questions.value.length) * 100)
+  return Math.round(((currentIndex.value + 1) / questions.value.length) * 100)
 })
 
 // 进度条颜色
@@ -209,13 +192,19 @@ const progressColor = computed(() => {
   return '#67C23A'
 })
 
-// 题目类型标签
+// 题目类型
 const questionTypeTag = computed(() => {
-  return currentQuestion.value?.type === 1 ? 'primary' : 'success'
+  const type = currentQuestion.value?.type
+  if (type === 1) return 'primary'
+  if (type === 2) return 'success'
+  return 'warning'
 })
 
 const questionTypeText = computed(() => {
-  return currentQuestion.value?.type === 1 ? '单选题' : '多选题'
+  const type = currentQuestion.value?.type
+  if (type === 1) return '单选题'
+  if (type === 2) return '多选题'
+  return '判断题'
 })
 
 // 难度标签
@@ -235,36 +224,151 @@ const difficultyText = computed(() => {
 
 // 是否可以提交
 const canSubmit = computed(() => {
-  if (currentQuestion.value?.type === 1) {
-    return selectedAnswer.value !== ''
-  } else {
-    return selectedAnswers.value.length > 0
-  }
+  const q = currentQuestion.value
+  if (!q) return false
+  if (q.type === 1) return selectedAnswer.value !== ''
+  if (q.type === 2) return selectedAnswers.value.length > 0
+  return selectedAnswer.value !== ''
 })
 
 // 是否正确
 const isCorrect = computed(() => {
-  return currentQuestion.value?.isCorrect
+  const q = currentQuestion.value
+  if (!q || !q.userAnswer) return false
+  return q.isCorrect
 })
+
+// 格式化答案
+const formatAnswer = (answer) => {
+  if (!answer) return ''
+  if (answer === 'true') return '正确'
+  if (answer === 'false') return '错误'
+  return answer.split('').sort().join('')
+}
+
+// 获取答题卡样式
+const getSheetItemClass = (index) => {
+  const q = questions.value[index]
+  if (index === currentIndex.value) return 'current'
+  if (q.userAnswer !== undefined) {
+    return q.isCorrect ? 'correct' : 'wrong'
+  }
+  return 'pending'
+}
+
+// 加载题目
+const loadQuestions = () => {
+  const config = JSON.parse(localStorage.getItem('currentPractice') || '{}')
+  
+  if (!config.knowledgeId) {
+    ElMessage.error('请先选择练习内容')
+    router.push('/practice/start')
+    return
+  }
+  
+  // 获取题目
+  let qs = getPracticeQuestions(
+    config.knowledgeId, 
+    config.questionCount || 10,
+    config.difficulty || 0
+  )
+  
+  // 如果没有足够的题目，补充其他知识点的题目
+  if (qs.length < config.questionCount) {
+    qs = getPracticeQuestions(config.knowledgeId, 100, 0).slice(0, config.questionCount)
+  }
+  
+  questions.value = qs.map(q => ({
+    ...q,
+    userAnswer: undefined,
+    isCorrect: undefined
+  }))
+  
+  // 如果还是没有题目，使用模拟数据
+  if (questions.value.length === 0) {
+    questions.value = generateMockQuestions(config.questionCount)
+  }
+  
+   // 重置答题记录
+  practiceRecord.value = {
+    startTime: Date.now(),
+    answers: [],
+    correctCount: 0
+  }
+}
+
+// 生成模拟题目
+const generateMockQuestions = (count) => {
+  const mockQuestions = []
+  for (let i = 0; i < count; i++) {
+    mockQuestions.push({
+      id: 1000 + i,
+      knowledgeId: 10102,
+      type: 1,
+      difficulty: Math.floor(Math.random() * 3) + 1,
+      content: `模拟题目 ${i + 1}：这是第 ${i + 1} 道测试题目`,
+      options: {
+        A: `选项 A - 第${i + 1}题`,
+        B: `选项 B - 第${i + 1}题`,
+        C: `选项 C - 第${i + 1}题`,
+        D: `选项 D - 第${i + 1}题`
+      },
+      answer: ['A', 'B', 'C', 'D'][Math.floor(Math.random() * 4)],
+      analysis: '这是模拟题目的解析。',
+      userAnswer: undefined,
+      isCorrect: undefined
+    })
+  }
+  return mockQuestions
+}
 
 // 提交答案
 const submitAnswer = () => {
+  const q = currentQuestion.value
   let userAnswer
-  if (currentQuestion.value.type === 1) {
+  
+  if (q.type === 1) {
     userAnswer = selectedAnswer.value
-  } else {
+  } else if (q.type === 2) {
     userAnswer = selectedAnswers.value.sort().join('')
+  } else {
+    userAnswer = selectedAnswer.value
   }
   
-  const correct = userAnswer === currentQuestion.value.answer
-  currentQuestion.value.userAnswer = userAnswer
-  currentQuestion.value.isCorrect = correct
-  showResult.value = true
+  const isCorrect = userAnswer === q.answer
   
-  // 保存到本地存储
+  // 如果这道题之前没答过，才记录
+  if (q.userAnswer === undefined) {
+    q.userAnswer = userAnswer
+    q.isCorrect = isCorrect
+    
+    practiceRecord.value.answers.push({
+      questionId: q.id,
+      userAnswer,
+      isCorrect,
+      time: elapsedTime.value
+    })
+    
+    if (isCorrect) {
+      practiceRecord.value.correctCount++
+    }
+  } else {
+    // 更新答案（如果修改）
+    const oldIsCorrect = q.isCorrect
+    q.userAnswer = userAnswer
+    q.isCorrect = isCorrect
+    
+    // 更新统计
+    if (oldIsCorrect && !isCorrect) {
+      practiceRecord.value.correctCount--
+    } else if (!oldIsCorrect && isCorrect) {
+      practiceRecord.value.correctCount++
+    }
+  }
+  
+  showResult.value = true
   saveProgress()
 }
-
 // 下一题
 const nextQuestion = () => {
   if (currentIndex.value < questions.value.length - 1) {
@@ -273,13 +377,16 @@ const nextQuestion = () => {
     selectedAnswers.value = []
     showResult.value = false
     
-    // 如果已经答过，显示之前的结果
-    if (currentQuestion.value.userAnswer) {
+    // 如果已经答过，恢复之前的状态
+    const q = currentQuestion.value
+    if (q.userAnswer !== undefined) {
       showResult.value = true
-      if (currentQuestion.value.type === 1) {
-        selectedAnswer.value = currentQuestion.value.userAnswer
+      if (q.type === 1) {
+        selectedAnswer.value = q.userAnswer
+      } else if (q.type === 2) {
+        selectedAnswers.value = q.userAnswer.split('')
       } else {
-        selectedAnswers.value = currentQuestion.value.userAnswer.split('')
+        selectedAnswer.value = q.userAnswer
       }
     }
   }
@@ -292,24 +399,17 @@ const jumpToQuestion = (index) => {
   selectedAnswers.value = []
   showResult.value = false
   
-  if (currentQuestion.value.userAnswer) {
+  const q = currentQuestion.value
+  if (q.userAnswer !== undefined) {
     showResult.value = true
-    if (currentQuestion.value.type === 1) {
-      selectedAnswer.value = currentQuestion.value.userAnswer
+    if (q.type === 1) {
+      selectedAnswer.value = q.userAnswer
+    } else if (q.type === 2) {
+      selectedAnswers.value = q.userAnswer.split('')
     } else {
-      selectedAnswers.value = currentQuestion.value.userAnswer.split('')
+      selectedAnswer.value = q.userAnswer
     }
   }
-}
-
-// 获取答题卡样式
-const getSheetItemClass = (index) => {
-  const q = questions.value[index]
-  if (index === currentIndex.value) return 'current'
-  if (q.userAnswer) {
-    return q.isCorrect ? 'correct' : 'wrong'
-  }
-  return 'pending'
 }
 
 // 保存进度
@@ -317,41 +417,155 @@ const saveProgress = () => {
   const progress = {
     questions: questions.value,
     currentIndex: currentIndex.value,
+    record: practiceRecord.value,
+    elapsedTime: elapsedTime.value,
     timestamp: Date.now()
   }
   localStorage.setItem('practiceProgress', JSON.stringify(progress))
 }
 
 // 完成刷题
-const finishPractice = () => {
+  const finishPractice = () => {
   const total = questions.value.length
-  const correct = questions.value.filter(q => q.isCorrect).length
+  const correct = practiceRecord.value.correctCount
   const accuracy = Math.round((correct / total) * 100)
   
-  ElMessageBox.confirm(
-    `您已完成 ${total} 道题目，正确 ${correct} 道，正确率 ${accuracy}%。是否查看详细结果？`,
-    '刷题完成',
-    {
-      confirmButtonText: '查看结果',
-      cancelButtonText: '返回首页',
-      type: 'success'
-    }
-  ).then(() => {
-    router.push({
-      path: '/practice/result',
-      query: { total, correct, accuracy }
-    })
-  }).catch(() => {
-    router.push('/dashboard')
-  })
+  // 保存历史记录
+  saveHistory(accuracy, correct, total)
+  
+  // 更新复习记录
+  updateReviewRecords()
+  
+  // 准备传递给结果页的数据
+  const resultData = {
+    questions: questions.value,
+    record: practiceRecord.value,
+    accuracy,
+    correct,
+    total,
+    elapsedTime: elapsedTime.value
+  }
+  
+  // 保存到 localStorage，确保结果页能获取
+  localStorage.setItem('practiceResult', JSON.stringify(resultData))
+  
+  // 清除进度
+  localStorage.removeItem('practiceProgress')
+  localStorage.removeItem('currentPractice')
+  
+  // 跳转到结果页
+  router.push('/practice/result')
 }
 
-onMounted(() => {
-  // 尝试恢复进度
+
+// 保存历史记录
+const saveHistory = (accuracy, correct, total) => {
+  const config = JSON.parse(localStorage.getItem('currentPractice') || '{}')
+  const history = JSON.parse(localStorage.getItem('practiceHistory') || '[]')
+  
+  history.unshift({
+    subjectName: getSubjectNameByKnowledge(config.knowledgeId),
+    knowledgeName: getKnowledgeName(config.knowledgeId),
+    knowledgeId: config.knowledgeId,
+    questionCount: total,
+    correctCount: correct,
+    accuracy,
+    date: new Date().toLocaleString('zh-CN')
+  })
+  
+  // 只保留最近10条
+  localStorage.setItem('practiceHistory', JSON.stringify(history.slice(0, 10)))
+}
+
+// 更新复习记录（用于艾宾浩斯）
+const updateReviewRecords = () => {
+  const config = JSON.parse(localStorage.getItem('currentPractice') || '{}')
+  const records = JSON.parse(localStorage.getItem('reviewRecords') || '[]')
+  
+  // 为每个答错的题目创建复习记录
+  questions.value.forEach(q => {
+    if (!q.isCorrect) {
+      records.push({
+        questionId: q.id,
+        knowledgeId: q.knowledgeId,
+        reviewStage: 1,
+        memoryLevel: 30,
+        correctCount: 0,
+        totalReviewCount: 1,
+        lastReviewTime: new Date().toISOString(),
+        nextReviewTime: getNextReviewTime(1),
+        status: 0 // 待复习
+      })
+    }
+  })
+  
+  localStorage.setItem('reviewRecords', JSON.stringify(records))
+}
+
+// 计算下次复习时间（艾宾浩斯）
+const getNextReviewTime = (stage) => {
+  const intervals = [5, 30, 720, 1440, 2880, 5760, 10080] // 分钟
+  const minutes = intervals[Math.min(stage - 1, intervals.length - 1)]
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString()
+}
+
+// 计时
+const startTimer = () => {
+  timer.value = setInterval(() => {
+    elapsedTime.value++
+  }, 1000)
+}
+
+// 尝试恢复进度
+const tryRestoreProgress = async () => {
   const saved = localStorage.getItem('practiceProgress')
-  if (saved) {
+  if (!saved) return false
+  
+  try {
     const progress = JSON.parse(saved)
-    // 可以询问是否继续上次的练习
+    // 只恢复2小时内的进度
+    if (Date.now() - progress.timestamp < 2 * 60 * 60 * 1000) {
+      const result = await ElMessageBox.confirm(
+        '检测到未完成的练习，是否继续？',
+        '提示',
+        {
+          confirmButtonText: '继续练习',
+          cancelButtonText: '重新开始',
+          type: 'info'
+        }
+      ).catch(() => false)
+      
+      if (result) {
+        questions.value = progress.questions
+        currentIndex.value = progress.currentIndex
+        practiceRecord.value = progress.record
+        elapsedTime.value = progress.elapsedTime || 0
+        return true
+      }
+    }
+  } catch (e) {
+    console.error('恢复进度失败:', e)
+  }
+  
+  localStorage.removeItem('practiceProgress')
+  return false
+}
+
+onMounted(async () => {
+  const restored = await tryRestoreProgress()
+  if (!restored) {
+    loadQuestions()
+  }
+  startTimer()
+})
+
+onBeforeUnmount(() => {
+  if (timer.value) {
+    clearInterval(timer.value)
+  }
+  // 如果没有完成，保存进度
+  if (questions.value.length > 0 && !showResult.value) {
+    saveProgress()
   }
 })
 </script>
@@ -374,6 +588,8 @@ onMounted(() => {
   }
   
   .question-card {
+    margin-bottom: 20px;
+    
     .question-header {
       margin-bottom: 20px;
       padding-bottom: 15px;
@@ -405,6 +621,21 @@ onMounted(() => {
         padding: 12px 16px;
         background: #f5f7fa;
         border-radius: 8px;
+        transition: all 0.3s;
+        
+        &:hover {
+          background: #e8eaed;
+        }
+        
+        &.correct-option {
+          background: #f0f9eb;
+          border: 1px solid #67C23A;
+        }
+        
+        &.wrong-option {
+          background: #fef0f0;
+          border: 1px solid #F56C6C;
+        }
         
         .option-label {
           font-weight: bold;
@@ -430,6 +661,17 @@ onMounted(() => {
     
     .answer-result {
       margin: 20px 0;
+      
+      .correct-answer-text {
+        margin: 10px 0 5px;
+        font-weight: bold;
+        color: #67C23A;
+      }
+      
+      .analysis-text {
+        margin-top: 10px;
+        line-height: 1.6;
+      }
     }
     
     .question-actions {

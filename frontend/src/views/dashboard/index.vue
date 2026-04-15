@@ -67,7 +67,7 @@
     <!-- 快捷入口 -->
     <el-row :gutter="20" class="quick-row">
       <el-col :span="8">
-        <el-card class="quick-card" shadow="hover" @click="$router.push('/practice')">
+        <el-card class="quick-card" shadow="hover" @click="$router.push('/practice/start')">
           <div class="quick-icon">
             <el-icon :size="40"><Edit /></el-icon>
           </div>
@@ -97,7 +97,7 @@
       </el-col>
     </el-row>
     
-    <!-- 今日任务 -->
+    <!-- 今日复习任务 -->
     <el-card class="task-card" shadow="hover">
       <template #header>
         <div class="card-header">
@@ -108,20 +108,24 @@
         </div>
       </template>
       
-      <el-table :data="todayTasks" style="width: 100%">
-        <el-table-column prop="title" label="知识点" />
-        <el-table-column prop="count" label="题目数" width="100" />
+      <el-table :data="todayTasks" style="width: 100%" :empty-text="emptyText">
+        <el-table-column prop="knowledgeName" label="知识点" />
+        <el-table-column prop="subjectName" label="学科" width="120" />
+        <el-table-column prop="questionCount" label="题目数" width="100" />
         <el-table-column prop="memoryLevel" label="记忆水平" width="150">
           <template #default="{ row }">
             <el-progress 
               :percentage="row.memoryLevel" 
-              :color="getProgressColor(row.memoryLevel)"
+              :color="getMemoryColor(row.memoryLevel)"
+              :stroke-width="8"
             />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="100">
-          <template #default>
-            <el-button type="primary" link>开始复习</el-button>
+          <template #default="{ row }">
+            <el-button type="primary" link @click="startReviewTask(row)">
+              开始复习
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -130,37 +134,176 @@
 </template>
 
 <script setup>
-import { reactive, computed } from 'vue'
+import { reactive, computed, ref, onMounted } from 'vue'
 import { useUserStore } from '@/store/modules/user'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
+import { generateReviewTasks } from '@/utils/ebbinghaus'
+import { getKnowledgeName, getSubjectNameByKnowledge } from '@/data/questions'
 
 dayjs.locale('zh-cn')
 
+const router = useRouter()
 const userStore = useUserStore()
 
 const currentDate = computed(() => {
   return dayjs().format('YYYY年MM月DD日 dddd')
 })
 
+// 统计数据
 const stats = reactive({
-  studyDays: 45,
-  totalQuestions: 1234,
-  pendingReview: 12,
-  accuracy: 78.5
+  studyDays: 1,
+  totalQuestions: 0,
+  pendingReview: 0,
+  accuracy: 0
 })
 
-const todayTasks = reactive([
-  { title: '高等数学 - 极限与连续', count: 5, memoryLevel: 35 },
-  { title: '英语 - 考研核心词汇', count: 20, memoryLevel: 72 },
-  { title: '政治 - 马原第一章', count: 8, memoryLevel: 58 }
-])
+// 今日任务
+const todayTasks = ref([])
 
-const getProgressColor = (level) => {
-  if (level > 70) return '#67C23A'
-  if (level > 40) return '#E6A23C'
+const emptyText = '🎉 暂无待复习任务，去刷题吧！'
+
+// 计算统计数据
+const calculateStats = () => {
+  // 1. 累计刷题数 - 从答题历史获取
+  const history = JSON.parse(localStorage.getItem('practiceHistory') || '[]')
+  stats.totalQuestions = history.reduce((sum, h) => sum + (h.questionCount || 0), 0)
+  
+  // 2. 正确率
+  if (history.length > 0) {
+    const totalCorrect = history.reduce((sum, h) => sum + (h.correctCount || 0), 0)
+    const totalQuestions = history.reduce((sum, h) => sum + (h.questionCount || 0), 0)
+    stats.accuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0
+  } else {
+    // 模拟数据
+    stats.totalQuestions = 1234
+    stats.accuracy = 78.5
+  }
+  
+  // 3. 学习天数 - 从历史记录计算
+  if (history.length > 0) {
+    const dates = [...new Set(history.map(h => h.date?.split(' ')[0]))]
+    stats.studyDays = dates.length || 1
+  } else {
+    stats.studyDays = 45
+  }
+  
+  // 4. 待复习任务数
+  const reviewRecords = JSON.parse(localStorage.getItem('reviewRecords') || '[]')
+  const tasks = generateReviewTasks(reviewRecords)
+  stats.pendingReview = tasks.length
+  
+  // 5. 今日复习任务（取前5个）
+  todayTasks.value = tasks.slice(0, 5).map(task => ({
+    ...task,
+    knowledgeName: task.knowledgeName || getKnowledgeName(task.knowledgeId) || '未知知识点',
+    subjectName: task.subjectName || getSubjectNameByKnowledge(task.knowledgeId) || '未知学科'
+  }))
+}
+
+// 获取记忆水平颜色
+const getMemoryColor = (level) => {
+  if (level >= 70) return '#67C23A'
+  if (level >= 40) return '#E6A23C'
   return '#F56C6C'
 }
+
+// 开始复习任务
+const startReviewTask = (row) => {
+  localStorage.setItem('currentReviewTasks', JSON.stringify([row]))
+  router.push('/review/doing')
+}
+
+// 初始化模拟数据（如果没有历史记录）
+const initMockData = () => {
+  const history = JSON.parse(localStorage.getItem('practiceHistory') || '[]')
+  
+  if (history.length === 0) {
+    // 创建模拟历史记录
+    const mockHistory = [
+      {
+        subjectName: '高等数学',
+        knowledgeName: '极限与连续',
+        knowledgeId: 10102,
+        questionCount: 20,
+        correctCount: 14,
+        accuracy: 70,
+        date: '2026-04-15 14:30'
+      },
+      {
+        subjectName: '英语',
+        knowledgeName: '考研核心词汇',
+        knowledgeId: 20101,
+        questionCount: 30,
+        correctCount: 24,
+        accuracy: 80,
+        date: '2026-04-14 09:15'
+      },
+      {
+        subjectName: '政治',
+        knowledgeName: '马原第一章',
+        knowledgeId: 30101,
+        questionCount: 15,
+        correctCount: 10,
+        accuracy: 67,
+        date: '2026-04-13 16:00'
+      }
+    ]
+    localStorage.setItem('practiceHistory', JSON.stringify(mockHistory))
+  }
+  
+  const reviewRecords = JSON.parse(localStorage.getItem('reviewRecords') || '[]')
+  
+  if (reviewRecords.length === 0) {
+    // 创建模拟复习记录
+    const now = new Date()
+    const mockRecords = [
+      {
+        id: 1,
+        questionId: 1,
+        knowledgeId: 10102,
+        reviewStage: 3,
+        correctCount: 2,
+        totalReviewCount: 3,
+        lastReviewTime: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+        nextReviewTime: now.toISOString(),
+        memoryLevel: 35,
+        status: 0
+      },
+      {
+        id: 2,
+        questionId: 9,
+        knowledgeId: 20101,
+        reviewStage: 2,
+        correctCount: 2,
+        totalReviewCount: 2,
+        lastReviewTime: new Date(now - 12 * 60 * 60 * 1000).toISOString(),
+        nextReviewTime: now.toISOString(),
+        memoryLevel: 72,
+        status: 0
+      },
+      {
+        id: 3,
+        questionId: 11,
+        knowledgeId: 30101,
+        reviewStage: 4,
+        correctCount: 3,
+        totalReviewCount: 4,
+        lastReviewTime: new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString(),
+        nextReviewTime: now.toISOString(),
+        memoryLevel: 58,
+        status: 0
+      }
+    ]
+    localStorage.setItem('reviewRecords', JSON.stringify(mockRecords))
+  }
+}
+
+onMounted(() => {
+  initMockData()
+  calculateStats()
+})
 </script>
 
 <style lang="scss" scoped>
