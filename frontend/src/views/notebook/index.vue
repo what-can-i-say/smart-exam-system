@@ -371,17 +371,17 @@ const folderTree = computed(() => notebookStore.folderTree)
 
 // 过滤后的错题
 const filteredQuestions = computed(() => {
-  let questions = currentFolder.value 
+  let questions = currentFolder.value
     ? notebookStore.questions.filter(q => q.folderId === currentFolder.value)
     : notebookStore.questions
-    
+
   if (searchKeyword.value) {
     questions = questions.filter(q =>
       q.content?.toLowerCase().includes(searchKeyword.value.toLowerCase()) ||
       q.knowledgeName?.includes(searchKeyword.value)
     )
   }
-  
+
   return questions
 })
 

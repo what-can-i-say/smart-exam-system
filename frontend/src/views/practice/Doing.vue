@@ -33,15 +33,15 @@
       
       <!-- 选项 -->
       <div class="question-options">
-        <el-radio-group 
-          v-model="selectedAnswer" 
+        <el-radio-group
+          v-model="selectedAnswer"
           v-if="currentQuestion.type === 1"
           :disabled="showResult"
         >
-          <el-radio 
-            v-for="(option, key) in currentQuestion.options" 
+          <el-radio
+            v-for="(option, key) in currentQuestion.options"
             :key="key"
-            :label="key"
+            :value="key"
             class="option-item"
             :class="{
               'correct-option': showResult && key === currentQuestion.answer,
@@ -52,30 +52,30 @@
             <span class="option-text">{{ option }}</span>
           </el-radio>
         </el-radio-group>
-        
-        <el-checkbox-group 
-          v-model="selectedAnswers" 
+
+        <el-checkbox-group
+          v-model="selectedAnswers"
           v-else-if="currentQuestion.type === 2"
           :disabled="showResult"
         >
-          <el-checkbox 
-            v-for="(option, key) in currentQuestion.options" 
+          <el-checkbox
+            v-for="(option, key) in currentQuestion.options"
             :key="key"
-            :label="key"
+            :value="key"
             class="option-item"
           >
             <span class="option-label">{{ key }}.</span>
             <span class="option-text">{{ option }}</span>
           </el-checkbox>
         </el-checkbox-group>
-        
-        <el-radio-group 
-          v-model="selectedAnswer" 
+
+        <el-radio-group
+          v-model="selectedAnswer"
           v-else-if="currentQuestion.type === 3"
           :disabled="showResult"
         >
-          <el-radio label="true" class="option-item">正确</el-radio>
-          <el-radio label="false" class="option-item">错误</el-radio>
+          <el-radio value="true" class="option-item">正确</el-radio>
+          <el-radio value="false" class="option-item">错误</el-radio>
         </el-radio-group>
       </div>
       
@@ -182,6 +182,7 @@ const currentQuestion = computed(() => questions.value[currentIndex.value])
 
 // 进度百分比
 const progressPercent = computed(() => {
+  if (questions.value.length === 0) return 0
   return Math.round(((currentIndex.value + 1) / questions.value.length) * 100)
 })
 

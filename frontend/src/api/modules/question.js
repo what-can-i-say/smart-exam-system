@@ -3,15 +3,24 @@ import request from '@/utils/request'
 // 获取学科列表
 export function getSubjects() {
   return request({
-    url: '/question/subjects',
+    url: '/questions/subjects',
     method: 'get'
+  })
+}
+
+// 获取章节列表
+export function getChapters(subjectId) {
+  return request({
+    url: '/questions/chapters',
+    method: 'get',
+    params: { subjectId }
   })
 }
 
 // 获取知识点列表
 export function getKnowledgePoints(subjectId) {
   return request({
-    url: '/question/knowledge',
+    url: '/questions/knowledge',
     method: 'get',
     params: { subjectId }
   })
@@ -20,7 +29,7 @@ export function getKnowledgePoints(subjectId) {
 // 获取练习题目
 export function getPracticeQuestions(params) {
   return request({
-    url: '/question/practice',
+    url: '/questions/practice/questions',
     method: 'get',
     params
   })
@@ -29,7 +38,7 @@ export function getPracticeQuestions(params) {
 // 提交答案
 export function submitAnswer(data) {
   return request({
-    url: '/question/answer',
+    url: '/questions/answer',
     method: 'post',
     data
   })
@@ -38,7 +47,15 @@ export function submitAnswer(data) {
 // 获取题目详情
 export function getQuestionDetail(id) {
   return request({
-    url: `/question/${id}`,
+    url: `/questions/${id}`,
+    method: 'get'
+  })
+}
+
+// 获取题目统计
+export function getQuestionStats() {
+  return request({
+    url: '/questions/stats',
     method: 'get'
   })
 }
