@@ -1,43 +1,35 @@
 import request from '@/utils/request'
 
-// 获取每日复习清单
-export function getDailyReviewList() {
+// 获取今日复习任务
+export function getTodayTasks() {
   return request({
-    url: '/review/daily',
+    url: '/review/tasks',
     method: 'get'
   })
 }
 
-// 获取复习进度
-export function getReviewProgress() {
+// 获取复习题目
+export function getReviewQuestions(params) {
   return request({
-    url: '/review/progress',
-    method: 'get'
+    url: '/review/questions',
+    method: 'get',
+    params
   })
 }
 
-// 开始复习
-export function startReview(data) {
+// 提交复习结果
+export function submitReview(data) {
   return request({
-    url: '/review/start',
-    method: 'post',
-    data
-  })
-}
-
-// 提交复习答案
-export function submitReviewAnswer(data) {
-  return request({
-    url: '/review/answer',
+    url: '/review/submit',
     method: 'post',
     data
   })
 }
 
 // 获取复习统计
-export function getReviewStatistics() {
+export function getReviewStats() {
   return request({
-    url: '/review/statistics',
+    url: '/review/stats',
     method: 'get'
   })
 }

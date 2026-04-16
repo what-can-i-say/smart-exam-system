@@ -2,7 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
 const service = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api',
   timeout: 10000
 })
 
@@ -27,7 +27,14 @@ service.interceptors.response.use(
     return res
   },
   error => {
-    ElMessage.error(error.message || '网络错误')
+    if (error.response?.status === 401) {
+      ElMessage.error('登录已过期，请重新登录')
+      localStorage.removeItem('token')
+      localStorage.removeItem('userInfo')
+      window.location.href = '/login'
+    } else {
+      ElMessage.error(error.message || '网络错误')
+    }
     return Promise.reject(error)
   }
 )

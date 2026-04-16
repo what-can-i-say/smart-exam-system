@@ -24,7 +24,7 @@
       
       <div class="options">
         <el-radio-group v-model="selectedAnswer" v-if="currentQuestion.type === 1">
-          <el-radio v-for="(opt, key) in currentQuestion.options" :key="key" :label="key" class="option-item">
+          <el-radio v-for="(opt, key) in currentQuestion.options" :key="key" :value="key" class="option-item">
             {{ key }}. {{ opt }}
           </el-radio>
         </el-radio-group>
@@ -84,7 +84,10 @@ const reviewResults = ref([])
 
 const totalQuestions = computed(() => questions.value.length)
 const currentQuestion = computed(() => questions.value[currentIndex.value])
-const progressPercent = computed(() => ((currentIndex.value + 1) / totalQuestions.value) * 100)
+const progressPercent = computed(() => {
+  if (totalQuestions.value === 0) return 0
+  return Math.round(((currentIndex.value + 1) / totalQuestions.value) * 100)
+})
 const isCorrect = computed(() => {
   const q = currentQuestion.value
   if (!q) return false

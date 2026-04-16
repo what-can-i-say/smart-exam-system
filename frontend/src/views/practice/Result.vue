@@ -320,7 +320,7 @@ onMounted(() => {
     questions.value = progress.questions
     total.value = progress.questions.length
     correct.value = progress.questions.filter(q => q.isCorrect).length
-    accuracy.value = Math.round((correct.value / total.value) * 100)
+    accuracy.value = total.value > 0 ? Math.round((correct.value / total.value) * 100) : 0
     elapsedTime.value = progress.elapsedTime || 0
   }
 })
